@@ -4,6 +4,7 @@
 #include <WebServer.h>
 #include <Preferences.h>
 #include <Update.h>
+#include <ESPmDNS.h>
 
 // --- 設定保存用 ---
 Preferences preferences;
@@ -11,6 +12,7 @@ String ssid = "";
 String password = "";
 int brightness = 255;
 bool enablePreview = true;
+String deviceName = ""; // mDNSホスト名 (例: tally-a1b2c3)
 
 // --- ネットワーク設定 ---
 WebServer server(80);
@@ -67,6 +69,8 @@ void updateTallyDisplay() {
 void handleRoot() {
     String html = htmlHeader;
     html += "<form action='/save' method='POST'>";
+    html += "<label>Device Name (hostname):</label><input type='text' name='devicename' value='" + deviceName + "'><br>";
+    html += "<small style='color:#888'>Companionに表示されるID。変更する場合は半角英数字のみ。例: cam1, cam2</small><br><br>";
     html += "<label>SSID:</label><input type='text' name='ssid' value='" + ssid + "'><br>";
     html += "<label>Password:</label><input type='password' name='password' value='" + password + "'><br>";
     html += "<label>Brightness (0-255):</label><input type='number' name='brightness' min='0' max='255' value='" + String(brightness) + "'><br>";
@@ -82,12 +86,15 @@ void handleRoot() {
 }
 
 void handleSave() {
+    if (server.hasArg("devicename") && server.arg("devicename").length() > 0)
+        deviceName = server.arg("devicename");
     if (server.hasArg("ssid")) ssid = server.arg("ssid");
     if (server.hasArg("password")) password = server.arg("password");
     if (server.hasArg("brightness")) brightness = server.arg("brightness").toInt();
     if (server.hasArg("preview")) enablePreview = (server.arg("preview") == "1");
 
     preferences.begin("tally", false);
+    preferences.putString("devicename", deviceName);
     preferences.putString("ssid", ssid);
     preferences.putString("password", password);
     preferences.putInt("brightness", brightness);
@@ -135,7 +142,22 @@ void setup() {
     password = preferences.getString("password", "");
     brightness = preferences.getInt("brightness", 255);
     enablePreview = preferences.getBool("preview", true);
+    deviceName = preferences.getString("devicename", "");
     preferences.end();
+
+    // deviceNameが未設定ならMACアドレスから自動生成
+    if (deviceName == "") {
+        uint8_t mac[6];
+        WiFi.macAddress(mac);
+        char macSuffix[7];
+        snprintf(macSuffix, sizeof(macSuffix), "%02x%02x%02x", mac[3], mac[4], mac[5]);
+        deviceName = String("tally-") + macSuffix;
+        // NVSに保存しておく
+        preferences.begin("tally", false);
+        preferences.putString("devicename", deviceName);
+        preferences.end();
+    }
+    Serial.println("Device Name: " + deviceName);
 
     // ボタンが押されているか、SSIDが空ならAPモード
     M5.update();
@@ -161,6 +183,18 @@ void setup() {
             // 接続成功: 緑一瞬
             M5.dis.drawpix(0, 0x00ff00);
             Serial.println("\nConnected! IP: " + WiFi.localIP().toString());
+
+            // mDNS起動: deviceName.local でアクセス可能に
+            if (MDNS.begin(deviceName.c_str())) {
+                // UDPタリーサービスを広告する
+                MDNS.addService("tally", "udp", localUdpPort);
+                MDNS.addServiceTxt("tally", "udp", "name", deviceName.c_str());
+                MDNS.addServiceTxt("tally", "udp", "port", String(localUdpPort).c_str());
+                Serial.println("mDNS started: " + deviceName + ".local");
+            } else {
+                Serial.println("mDNS failed");
+            }
+
             delay(1000);
             M5.dis.drawpix(0, 0x000000);
             

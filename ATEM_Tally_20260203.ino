@@ -30,39 +30,93 @@ const int pwmChannels[NUM_EXTERNAL_LEDS] = {0, 1, 2, 3, 4};
 
 // 現在の状態
 String currentState = "off";
+int currentCamNumber = 0;
+
+// 1から9までの5x5ピクセルマスク
+const uint8_t digitMask[10][25] = {
+    // 0 (使わない)
+    {0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0},
+    // 1
+    {0,0,1,0,0, 0,1,1,0,0, 0,0,1,0,0, 0,0,1,0,0, 0,1,1,1,0},
+    // 2
+    {0,1,1,1,0, 1,0,0,0,1, 0,0,0,1,0, 0,0,1,0,0, 1,1,1,1,1},
+    // 3
+    {0,1,1,1,0, 1,0,0,0,1, 0,0,1,1,0, 1,0,0,0,1, 0,1,1,1,0},
+    // 4
+    {0,0,0,1,0, 0,0,1,1,0, 0,1,0,1,0, 1,1,1,1,1, 0,0,0,1,0},
+    // 5
+    {1,1,1,1,1, 1,0,0,0,0, 1,1,1,1,0, 0,0,0,0,1, 1,1,1,1,0},
+    // 6
+    {0,1,1,1,0, 1,0,0,0,0, 1,1,1,1,0, 1,0,0,0,1, 0,1,1,1,0},
+    // 7
+    {1,1,1,1,1, 0,0,0,0,1, 0,0,0,1,0, 0,0,1,0,0, 0,0,1,0,0},
+    // 8
+    {0,1,1,1,0, 1,0,0,0,1, 0,1,1,1,0, 1,0,0,0,1, 0,1,1,1,0},
+    // 9
+    {0,1,1,1,0, 1,0,0,0,1, 0,1,1,1,1, 0,0,0,0,1, 0,1,1,1,0}
+};
 
 // HTML テンプレート (設定画面)
 const char* htmlHeader = "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Tally Setup</title><style>body{font-family:sans-serif;margin:20px;}input,button,select{font-size:16px;margin:5px 0;padding:5px;}label{display:block;margin-top:10px;}</style></head><body><h2>ATEM Tally Setup</h2>";
 const char* htmlFooter = "</body></html>";
 
+void fillPix(uint32_t color) {
+    for (int i = 0; i < 25; i++) {
+        M5.dis.drawpix(i, color);
+    }
+}
+
 void setupPWM() {
     for (int i = 0; i < NUM_EXTERNAL_LEDS; i++) {
-        ledcSetup(pwmChannels[i], pwmFreq, pwmResolution);
-        ledcAttachPin(externalLedPins[i], pwmChannels[i]);
-        ledcWrite(pwmChannels[i], 0);
+        ledcAttach(externalLedPins[i], pwmFreq, pwmResolution);
+        ledcWrite(externalLedPins[i], 0);
     }
 }
 
 void setExternalLEDs(int val) {
     for (int i = 0; i < NUM_EXTERNAL_LEDS; i++) {
-        ledcWrite(pwmChannels[i], val);
+        ledcWrite(externalLedPins[i], val);
+    }
+}
+
+void drawDigit(int num, uint32_t color) {
+    if (num < 1 || num > 9) {
+        fillPix(color);
+        return;
+    }
+    for (int i=0; i<25; i++) {
+        // M5が上下逆になっているので24-iに描画して180度回転させる
+        int drawIndex = 24 - i;
+        if (digitMask[num][i]) {
+            M5.dis.drawpix(drawIndex, color);
+        } else {
+            M5.dis.drawpix(drawIndex, 0x000000);
+        }
     }
 }
 
 void updateTallyDisplay() {
     if (currentState == "pgm") {
-        M5.dis.drawpix(0, 0xff0000); // 内蔵LEDも赤
+        fillPix(0xff0000); // 内蔵LEDも赤
         setExternalLEDs(brightness);
     } else if (currentState == "pvw") {
         setExternalLEDs(0);
         if (enablePreview) {
-            M5.dis.drawpix(0, 0x00ff00); // 内蔵緑
+            fillPix(0x00ff00); // 内蔵緑
         } else {
-            M5.dis.drawpix(0, 0x000000); // 消灯
+            if (currentCamNumber >= 1 && currentCamNumber <= 9) {
+                drawDigit(currentCamNumber, 0x222222); // 暗めの白で番号を表示
+            } else {
+                fillPix(0x000000); // 消灯
+            }
         }
     } else { // off
-        M5.dis.drawpix(0, 0x000000);
         setExternalLEDs(0);
+        if (currentCamNumber >= 1 && currentCamNumber <= 9) {
+            drawDigit(currentCamNumber, 0x222222); // 暗めの白で番号を表示
+        } else {
+            fillPix(0x000000);
+        }
     }
 }
 
@@ -166,7 +220,7 @@ void setup() {
         WiFi.mode(WIFI_AP);
         WiFi.softAP("Tally-Setup");
         Serial.println("AP Mode: Tally-Setup");
-        M5.dis.drawpix(0, 0xffff00); // APモードは黄色
+        fillPix(0xffff00); // APモードは黄色
     } else {
         WiFi.mode(WIFI_STA);
         WiFi.begin(ssid.c_str(), password.c_str());
@@ -175,13 +229,13 @@ void setup() {
         while (WiFi.status() != WL_CONNECTED && timeout < 20) { // 10秒待機
             delay(500);
             Serial.print(".");
-            M5.dis.drawpix(0, (timeout % 2 == 0) ? 0x0000ff : 0x000000); // 接続中 青点滅
+            fillPix((timeout % 2 == 0) ? 0x0000ff : 0x000000); // 接続中 青点滅
             timeout++;
         }
         
         if (WiFi.status() == WL_CONNECTED) {
             // 接続成功: 緑一瞬
-            M5.dis.drawpix(0, 0x00ff00);
+            fillPix(0x00ff00);
             Serial.println("\nConnected! IP: " + WiFi.localIP().toString());
 
             // mDNS起動: deviceName.local でアクセス可能に
@@ -196,7 +250,7 @@ void setup() {
             }
 
             delay(1000);
-            M5.dis.drawpix(0, 0x000000);
+            fillPix(0x000000);
             
             udp.begin(localUdpPort);
             Serial.println("UDP Listening on port " + String(localUdpPort));
@@ -205,7 +259,7 @@ void setup() {
             isAPMode = true;
             WiFi.mode(WIFI_AP);
             WiFi.softAP("Tally-Setup");
-            M5.dis.drawpix(0, 0xff0000);
+            fillPix(0xff0000);
             Serial.println("\nWiFi Connect Failed. Fallback to AP Mode.");
         }
     }
@@ -230,27 +284,7 @@ void loop() {
             String command = String(packetBuffer);
             command.trim();
 
-            if (command == "pgm") {
-                currentState = "pgm";
-                updateTallyDisplay();
-            } else if (command == "pvw") {
-                currentState = "pvw";
-                updateTallyDisplay();
-            } else if (command == "off") {
-                currentState = "off";
-                updateTallyDisplay();
-            } else if (command == "identify") {
-                // Identity（全体青色とLEDが高速点滅）
-                for (int i=0; i<10; i++) {
-                    M5.dis.drawpix(0, 0x0000ff);
-                    setExternalLEDs(brightness);
-                    delay(100);
-                    M5.dis.drawpix(0, 0x000000);
-                    setExternalLEDs(0);
-                    delay(100);
-                }
-                updateTallyDisplay(); // 元の状態に戻す
-            } else if (command.startsWith("dim:")) {
+            if (command.startsWith("dim:")) {
                 // 例: "dim:128" -> 128
                 int newBright = command.substring(4).toInt();
                 if (newBright >= 0 && newBright <= 255) {
@@ -262,6 +296,27 @@ void loop() {
                     // 設定反映
                     updateTallyDisplay();
                 }
+            } else if (command == "identify") {
+                // Identity（全体青色とLEDが高速点滅）
+                for (int i=0; i<10; i++) {
+                    fillPix(0x0000ff);
+                    setExternalLEDs(brightness);
+                    delay(100);
+                    fillPix(0x000000);
+                    setExternalLEDs(0);
+                    delay(100);
+                }
+                updateTallyDisplay(); // 元の状態に戻す
+            } else {
+                // 例: "pgm:1", "pvw:2", "off:3" または従来通りの "pgm", "off" など
+                int colonIdx = command.indexOf(':');
+                if (colonIdx != -1) {
+                    currentState = command.substring(0, colonIdx);
+                    currentCamNumber = command.substring(colonIdx + 1).toInt();
+                } else {
+                    currentState = command;
+                }
+                updateTallyDisplay();
             }
         }
     }

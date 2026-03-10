@@ -1,6 +1,6 @@
 {
-    "name": "companion-module-atem-tally",
-    "version": "1.0.0",
+    "name": "atem-tally-custom",
+    "version": "1.0.2",
     "main": "main.js",
     "dependencies": {
         "@companion-module/base": "^1.8.0",

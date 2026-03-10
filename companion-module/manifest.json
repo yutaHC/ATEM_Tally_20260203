@@ -1,0 +1,24 @@
+{
+	"id": "atem-tally-custom",
+	"name": "ATEM Tally Custom",
+	"shortname": "Tally",
+	"description": "Custom tally module for ATEM Tally 20260203",
+	"version": "1.0.0",
+	"license": "MIT",
+	"repository": "",
+	"bugs": "",
+	"maintainers": [],
+	"runtime": {
+		"type": "node18",
+		"api": "nodejs-ipc",
+		"entrypoint": "main.js"
+	},
+	"manufacturer": "Custom",
+	"products": [
+		"ATEM Tally"
+	],
+	"keywords": [
+		"tally",
+		"atem"
+	]
+}
